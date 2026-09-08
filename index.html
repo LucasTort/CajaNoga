@@ -206,6 +206,25 @@
     border-color:var(--danger);
   }
 
+  .btn-secondary{
+    width:100%;
+    background:var(--surface-2);
+    color:var(--text);
+    font-family:'Oswald',sans-serif;
+    font-weight:500;
+    font-size:13px;
+    letter-spacing:0.5px;
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:11px 0;
+    cursor:pointer;
+    transition:all .15s ease;
+  }
+  .btn-secondary:hover{
+    border-color:var(--profit);
+    color:var(--profit);
+  }
+
   /* entries list */
   .section-label{
     font-family:'Oswald',sans-serif;
@@ -346,6 +365,42 @@
     border-color:var(--profit);
   }
 
+  .month-nav{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:4px;
+  }
+  .month-nav-btn{
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    color:var(--text);
+    font-size:18px;
+    line-height:1;
+    width:36px;
+    height:32px;
+    border-radius:5px;
+    cursor:pointer;
+  }
+  .month-nav-btn:disabled{
+    opacity:0.35;
+    cursor:default;
+  }
+  .month-nav-btn:not(:disabled):hover{
+    border-color:var(--accent);
+    color:var(--accent);
+  }
+  .month-nav-label{
+    font-family:'Oswald',sans-serif;
+    font-size:14px;
+    letter-spacing:0.5px;
+    text-transform:capitalize;
+    color:var(--text);
+  }
+
   .daylist{display:flex; flex-direction:column; gap:6px;}
   .day-row{
     background:var(--surface);
@@ -474,6 +529,12 @@
         <button class="filter-btn" data-filter="todo">Todo</button>
       </div>
 
+      <div class="month-nav" id="monthNav" style="display:none;">
+        <button class="month-nav-btn" id="btnPrevMonth" aria-label="Mes anterior">‹</button>
+        <div class="month-nav-label" id="monthNavLabel">Septiembre 2026</div>
+        <button class="month-nav-btn" id="btnNextMonth" aria-label="Mes siguiente">›</button>
+      </div>
+
       <div class="odometer-wrap">
         <div class="odometer-label" id="histLabel">Acumulado — semana (lun a dom)</div>
         <div class="odometer" id="odometerHist"></div>
@@ -484,6 +545,7 @@
         <div class="daylist" id="dayList"></div>
       </div>
 
+      <button class="btn-secondary" id="btnExport">Exportar a Excel (CSV)</button>
       <button class="btn-danger" id="btnReset">Vaciar caja</button>
 
     </div>
@@ -651,6 +713,26 @@
     return { start: toDateStr(monday), end: toDateStr(sunday) };
   }
 
+  var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  var currentMonthOffset = 0; // 0 = mes actual, -1 = mes anterior, etc.
+
+  function targetMonthDate(offset){
+    var d = new Date();
+    d.setDate(1); // evita saltos de mes por días inexistentes (ej. 31 -> mes corto)
+    d.setMonth(d.getMonth() + offset);
+    return d;
+  }
+
+  function targetMonthPrefix(offset){
+    var d = targetMonthDate(offset);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function monthLabel(offset){
+    var d = targetMonthDate(offset);
+    return MESES[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
   function filterEntries(filter){
     if(filter === 'todo') return entries.slice();
     if(filter === 'semana'){
@@ -658,14 +740,20 @@
       return entries.filter(function(e){ return e.date >= range.start && e.date <= range.end; });
     }
     if(filter === 'mes'){
-      var now = new Date();
-      var prefix = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+      var prefix = targetMonthPrefix(currentMonthOffset);
       return entries.filter(function(e){ return e.date.slice(0,7) === prefix; });
     }
     return entries.slice();
   }
 
   function renderHistorial(){
+    var monthNav = document.getElementById('monthNav');
+    monthNav.style.display = (currentFilter === 'mes') ? 'flex' : 'none';
+    if(currentFilter === 'mes'){
+      document.getElementById('monthNavLabel').textContent = monthLabel(currentMonthOffset);
+      document.getElementById('btnNextMonth').disabled = (currentMonthOffset >= 0);
+    }
+
     var filtered = filterEntries(currentFilter);
     var byDay = {};
     filtered.forEach(function(e){
@@ -676,7 +764,7 @@
 
     var labelMap = {
       semana: 'Acumulado — semana (lun a dom)',
-      mes: 'Acumulado — este mes',
+      mes: 'Acumulado — ' + monthLabel(currentMonthOffset),
       todo: 'Acumulado — histórico'
     };
     document.getElementById('histLabel').textContent = labelMap[currentFilter];
@@ -735,10 +823,67 @@
     });
   });
 
+  document.getElementById('btnPrevMonth').addEventListener('click', function(){
+    currentMonthOffset -= 1;
+    renderHistorial();
+  });
+
+  document.getElementById('btnNextMonth').addEventListener('click', function(){
+    if(currentMonthOffset < 0){
+      currentMonthOffset += 1;
+      renderHistorial();
+    }
+  });
+
   document.getElementById('inCosto').addEventListener('input', updateLiveGanancia);
   document.getElementById('inPrecio').addEventListener('input', updateLiveGanancia);
   document.getElementById('inGastos').addEventListener('input', updateLiveGanancia);
   document.getElementById('inCostoEmpleado').addEventListener('input', updateLiveGanancia);
+
+  function csvEscape(val){
+    var s = String(val);
+    if(s.indexOf(';') > -1 || s.indexOf('"') > -1 || s.indexOf('\n') > -1){
+      s = '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  document.getElementById('btnExport').addEventListener('click', function(){
+    if(entries.length === 0){
+      alert('No hay datos cargados todavía para exportar.');
+      return;
+    }
+    var header = ['Fecha','Modelo','Costo','Precio Cliente','Gastos Extras','Costo Empleado','Ganancia'];
+    var sorted = entries.slice().sort(function(a,b){
+      return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0);
+    });
+    var lines = [header.join(';')];
+    sorted.forEach(function(e){
+      var row = [
+        e.date,
+        e.modelo || '',
+        Math.round(e.costo || 0),
+        Math.round(e.precio || 0),
+        Math.round(e.gastos || 0),
+        Math.round(e.costoEmpleado || 0),
+        Math.round(e.ganancia || 0)
+      ].map(csvEscape);
+      lines.push(row.join(';'));
+    });
+    // BOM al inicio para que Excel reconozca tildes/ñ correctamente; ';' como
+    // separador porque Excel en configuración regional Argentina usa coma
+    // para decimales, así que espera punto y coma entre columnas.
+    var csvContent = '\uFEFF' + lines.join('\r\n');
+    var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'caja_noga_' + todayStr() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
 
   document.getElementById('btnReset').addEventListener('click', function(){
     if(entries.length === 0){
